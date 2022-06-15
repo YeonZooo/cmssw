@@ -154,6 +154,8 @@ void GEMRawToDigiModule::produce(edm::StreamID iID, edm::Event& iEvent, edm::Eve
       GEMAMCStatus st_amc(amc13.get(), amc);
       if (st_amc.isBad()) {
         LogDebug("GEMRawToDigiModule") << st_amc;
+        edm::LogWarning("GEMRawToDigiModule")
+            << "fedId: " << int(fedId) << " amcNum:" << int(amcNum) << " status: " << st_amc;
         if (keepDAQStatus_) {
           outAMCStatus.get()->insertDigi(fedId, st_amc);
         }
@@ -172,6 +174,7 @@ void GEMRawToDigiModule::produce(edm::StreamID iID, edm::Event& iEvent, edm::Eve
         bool isValidChamber = gemROMap->isValidChamber(geb_ec);
         if (!isValidChamber) {
           st_amc.inValidOH();
+          edm::LogWarning("GEMRawToDigiModule") << "amcNum:" << int(amcNum) << " OHnum:" << int(gebId);
           continue;
         }
         GEMROMapping::chamDC geb_dc = gemROMap->chamberPos(geb_ec);
@@ -180,6 +183,8 @@ void GEMRawToDigiModule::produce(edm::StreamID iID, edm::Event& iEvent, edm::Eve
         GEMOHStatus st_oh(optoHybrid);
         if (st_oh.isBad()) {
           LogDebug("GEMRawToDigiModule") << st_oh;
+          edm::LogWarning("GEMRawToDigiModule")
+              << "amcNum:" << int(amcNum) <<" OHnym:" << int(gebId) << " status: " << st_oh;
           if (keepDAQStatus_) {
             outOHStatus.get()->insertDigi(gemChId, st_oh);
           }
@@ -190,20 +195,22 @@ void GEMRawToDigiModule::produce(edm::StreamID iID, edm::Event& iEvent, edm::Eve
           // set vfat fw version
           vfat.setVersion(geb_dc.vfatVer);
           uint16_t vfatId = vfat.vfatId();
-          GEMROMapping::vfatEC vfat_ec{vfatId, gemChId};
+          GEMROMapping::vfatDC vfat_dc{geb_dc.chamberType, vfatId};
 
-          if (!gemROMap->isValidChipID(vfat_ec)) {
+          if (!gemROMap->isValidChipID(vfat_dc)) {
             st_oh.inValidVFAT();
+            edm::LogWarning("GEMRawToDigiModule")
+                << "amcNum:" << int(amcNum) << " OHnum:" << int(gebId) << " vfatId:" << vfatId;
             continue;
           }
 
-          GEMROMapping::vfatDC vfat_dc = gemROMap->vfatPos(vfat_ec);
-          vfat.setPhi(vfat_dc.localPhi);
-          GEMDetId gemId = vfat_dc.detId;
+          GEMDetId gemId(gemChId.region(), gemChId.ring(), gemChId.station(), gemChId.layer(), gemChId.chamber(), 0);
 
           GEMVFATStatus st_vfat(amc, vfat, vfat.phi(), readMultiBX_);
           if (st_vfat.isBad()) {
             LogDebug("GEMRawToDigiModule") << st_vfat;
+            edm::LogWarning("GEMRawToDigiModule") << "amcNum:" << int(amcNum) << " OHnum:" << int(gebId)
+                                                  << " vfatId:" << vfatId << " status: " << st_vfat;
             if (keepDAQStatus_) {
               outVFATStatus.get()->insertDigi(gemId, st_vfat);
             }
@@ -223,16 +230,24 @@ void GEMRawToDigiModule::produce(edm::StreamID iID, edm::Event& iEvent, edm::Eve
             if (chan0xf == 0)
               continue;
 
-            GEMROMapping::channelNum chMap{vfat_dc.vfatType, chan};
+            GEMROMapping::channelNum chMap{vfat_dc.chamberType, vfat_dc.vfatAdd, chan};
             GEMROMapping::stripNum stMap = gemROMap->hitPos(chMap);
 
-            int stripId = stMap.stNum + vfat.phi() * GEMeMap::maxChan_;
+            int stripId = stMap.stNum;
+            int ieta = stMap.iEta;
+
+            // ieta == 0 means not connected channel
+            if (ieta == 0)
+              continue;
+
+            GEMDetId gemId(
+                gemChId.region(), gemChId.ring(), gemChId.station(), gemChId.layer(), gemChId.chamber(), ieta);
 
             GEMDigi digi(stripId, bx);
 
             LogDebug("GEMRawToDigiModule")
                 << "fed: " << fedId << " amc:" << int(amcNum) << " geb:" << int(gebId) << " vfat id:" << int(vfatId)
-                << ",type:" << vfat_dc.vfatType << " id:" << gemId << " ch:" << chMap.chNum << " st:" << digi.strip()
+                << ",type:" << vfat_dc.chamberType << " id:" << gemId << " ch:" << chMap.chNum << " st:" << digi.strip()
                 << " bx:" << digi.bx();
 
             outGEMDigis.get()->insertDigi(gemId, digi);
